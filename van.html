@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>梵高名作粒子交互</title>
+    <style>
+        /* 全局样式 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            background-color: #000;
+            color: white;
+        }
+        
+        /* 画布容器 */
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* 加载指示器 */
+        #loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 18px;
+            z-index: 100;
+            text-align: center;
+        }
+        
+        #loading-bar {
+            width: 200px;
+            height: 4px;
+            background-color: rgba(255, 255, 255, 0.3);
+            margin-top: 10px;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        
+        #loading-progress {
+            height: 100%;
+            background-color: #fff;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        
+        /* 手势提示 */
+        #gesture-hint {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            border-radius: 20px;
+            font-size: 14px;
+            opacity: 0.8;
+            transition: opacity 0.3s ease;
+            z-index: 50;
+        }
+        
+        /* 当前画作信息 */
+        #current-painting {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 8px 16px;
+            background-color: rgba(0, 0, 0, 0.7);
+            border-radius: 15px;
+            font-size: 12px;
+            opacity: 0.8;
+            z-index: 50;
+        }
+    </style>
+</head>
+<body>
+    <!-- 画布容器 -->
+    <div id="canvas-container"></div>
+    
+    <!-- 加载指示器 -->
+    <div id="loading">
+        <div>正在加载梵高画作...</div>
+        <div id="loading-bar">
+            <div id="loading-progress"></div>
+        </div>
+    </div>
+    
+    <!-- 手势提示 -->
+    <div id="gesture-hint">张开手掌：流星云模式 | 握拳：切换画作</div>
+    
+    <!-- 当前画作信息 -->
+    <div id="current-painting">当前画作：星月夜</div>
+    
+    <!-- 引入Three.js -->
+    <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+    
+    <!-- 引入MediaPipe Hands -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    
+    <script>
+        // 全局变量定义
+        let scene, camera, renderer, particles;
+        let particleCount = 40000;
+        let particleAttributes = {
+            currentPositions: [],
+            targetPositions: [],
+            colors: [],
+            velocities: []
+        };
+        
+        // 画作数据 - 使用CORS友好的图片源
+        let paintings = [
+            { name: "星月夜", url: "https://picsum.photos/id/1024/1024/1024" },
+            { name: "向日葵", url: "https://picsum.photos/id/1005/1024/1024" },
+            { name: "麦田群鸦", url: "https://picsum.photos/id/1036/1024/1024" },
+            { name: "罗纳河上的星夜", url: "https://picsum.photos/id/1039/1024/1024" }
+        ];
+        
+        let currentPaintingIndex = 0;
+        let loadedPaintingsData = [];
+        let loadingProgress = 0;
+        
+        // 手势识别相关
+        let hands = null;
+        let isHandOpen = false;
+        let previousHandOpen = false;
+        let handCenter = { x: 0, y: 0 };
+        
+        // 动画相关
+        let animationId = null;
+        let time = 0;
+        
+        // 初始化函数
+        function init() {
+            setupScene();
+            setupParticles();
+            preloadPaintings();
+            setupHandTracking();
+            startAnimation();
+        }
+        
+        // 设置场景
+        function setupScene() {
+            // 创建场景
+            scene = new THREE.Scene();
+            
+            // 创建相机
+            camera = new THREE.PerspectiveCamera(
+                75,
+                window.innerWidth / window.innerHeight,
+                0.1,
+                1000
+            );
+            camera.position.z = 100;
+            
+            // 创建渲染器
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+            
+            // 监听窗口大小变化
+            window.addEventListener('resize', onWindowResize);
+        }
+        
+        // 窗口大小变化处理
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        
+        // 设置粒子系统
+        function setupParticles() {
+            // 创建几何体
+            const geometry = new THREE.BufferGeometry();
+            
+            // 初始化粒子属性
+            for (let i = 0; i < particleCount; i++) {
+                // 随机初始位置
+                particleAttributes.currentPositions.push(
+                    (Math.random() - 0.5) * 200,
+                    (Math.random() - 0.5) * 200,
+                    (Math.random() - 0.5) * 50
+                );
+                
+                // 目标位置（将在加载画作后设置）
+                particleAttributes.targetPositions.push(0, 0, 0);
+                
+                // 初始颜色
+                particleAttributes.colors.push(1, 1, 1);
+                
+                // 初始速度
+                particleAttributes.velocities.push(
+                    (Math.random() - 0.5) * 0.1,
+                    (Math.random() - 0.5) * 0.1,
+                    (Math.random() - 0.5) * 0.1
+                );
+            }
+            
+            // 设置BufferAttribute
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(particleAttributes.currentPositions, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(particleAttributes.colors, 3));
+            
+            // 粒子材质
+            const material = new THREE.PointsMaterial({
+                size: 1.5,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.9,
+                blending: THREE.AdditiveBlending,
+                depthTest: false
+            });
+            
+            // 创建粒子系统
+            particles = new THREE.Points(geometry, material);
+            scene.add(particles);
+        }
+        
+        // 预加载画作
+        function preloadPaintings() {
+            loadedPaintingsData = [];
+            loadingProgress = 0;
+            
+            paintings.forEach((painting, index) => {
+                loadImage(painting.url, painting.name, (imageData, name) => {
+                    loadedPaintingsData.push({ name, imageData });
+                    loadingProgress++;
+                    
+                    // 更新加载进度
+                    const progressPercent = (loadingProgress / paintings.length) * 100;
+                    document.getElementById('loading-progress').style.width = progressPercent + '%';
+                    
+                    // 所有画作加载完成
+                    if (loadingProgress === paintings.length) {
+                        // 隐藏加载指示器
+                        setTimeout(() => {
+                            document.getElementById('loading').style.opacity = '0';
+                            setTimeout(() => {
+                                document.getElementById('loading').style.display = 'none';
+                            }, 300);
+                        }, 500);
+                        
+                        // 初始化粒子为第一幅画
+                        updateParticlePositionsAndColors(loadedPaintingsData[0]);
+                    }
+                });
+            });
+        }
+        
+        // 加载图片并提取像素数据
+        function loadImage(url, name, callback) {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            
+            img.onload = () => {
+                // 创建canvas获取像素数据
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                // 设置canvas大小与图片一致
+                canvas.width = img.width;
+                canvas.height = img.height;
+                
+                // 绘制图片到canvas
+                ctx.drawImage(img, 0, 0);
+                
+                // 获取像素数据
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                
+                callback(imageData, name);
+            };
+            
+            img.onerror = () => {
+                console.error('图片加载失败:', url);
+                // 重试或使用默认颜色
+                const defaultCanvas = document.createElement('canvas');
+                defaultCanvas.width = 512;
+                defaultCanvas.height = 512;
+                const ctx = defaultCanvas.getContext('2d');
+                ctx.fillStyle = '#808080';
+                ctx.fillRect(0, 0, defaultCanvas.width, defaultCanvas.height);
+                const imageData = ctx.getImageData(0, 0, defaultCanvas.width, defaultCanvas.height);
+                callback(imageData, name);
+            };
+            
+            img.src = url;
+        }
+        
+        // 更新粒子位置和颜色
+        function updateParticlePositionsAndColors(paintingData) {
+            const imageData = paintingData.imageData;
+            const width = imageData.width;
+            const height = imageData.height;
+            const data = imageData.data;
+            
+            // 更新当前画作显示
+            document.getElementById('current-painting').textContent = `当前画作：${paintingData.name}`;
+            
+            const geometry = particles.geometry;
+            const positions = geometry.attributes.position.array;
+            const colors = geometry.attributes.color.array;
+            
+            // 计算缩放比例，使画作适应粒子系统
+            const scaleX = 180 / width;
+            const scaleY = 180 / height;
+            
+            for (let i = 0; i < particleCount; i++) {
+                // 随机选择图片上的像素点
+                const pixelX = Math.floor(Math.random() * width);
+                const pixelY = Math.floor(Math.random() * height);
+                const pixelIndex = (pixelY * width + pixelX) * 4;
+                
+                // 获取像素颜色
+                const r = data[pixelIndex] / 255;
+                const g = data[pixelIndex + 1] / 255;
+                const b = data[pixelIndex + 2] / 255;
+                
+                // 设置粒子颜色
+                colors[i * 3] = r;
+                colors[i * 3 + 1] = g;
+                colors[i * 3 + 2] = b;
+                
+                // 设置粒子目标位置
+                const targetX = (pixelX - width / 2) * scaleX;
+                const targetY = (height / 2 - pixelY) * scaleY;
+                
+                particleAttributes.targetPositions[i * 3] = targetX;
+                particleAttributes.targetPositions[i * 3 + 1] = targetY;
+                particleAttributes.targetPositions[i * 3 + 2] = 0;
+            }
+            
+            // 更新BufferAttribute
+            geometry.attributes.color.needsUpdate = true;
+        }
+        
+        // 设置手势追踪
+        function setupHandTracking() {
+            hands = new Hands({
+                locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                }
+            });
+            
+            // 配置Hands
+            hands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.7,
+                minTrackingConfidence: 0.7
+            });
+            
+            // 设置结果回调
+            hands.onResults(onHandResults);
+            
+            // 创建虚拟相机用于手势追踪
+            const cameraElement = document.createElement('video');
+            const camera = new Camera(cameraElement, {
+                onFrame: async () => {
+                    await hands.send({ image: cameraElement });
+                },
+                width: 640,
+                height: 480
+            });
+            camera.start();
+        }
+        
+        // 手势结果处理
+        function onHandResults(results) {
+            if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+                // 未检测到手
+                isHandOpen = false;
+                return;
+            }
+            
+            const hand = results.multiHandLandmarks[0];
+            
+            // 计算手掌中心位置
+            const wrist = hand[0];
+            const middleMcp = hand[9];
+            handCenter.x = (wrist.x + middleMcp.x) / 2;
+            handCenter.y = (wrist.y + middleMcp.y) / 2;
+            
+            // 检测手掌张开/握拳状态
+            isHandOpen = detectOpenPalm(hand);
+        }
+        
+        // 检测手掌张开状态
+        function detectOpenPalm(handLandmarks) {
+            // 获取关键关节点
+            const thumbTip = handLandmarks[4];
+            const indexTip = handLandmarks[8];
+            const middleTip = handLandmarks[12];
+            const ringTip = handLandmarks[16];
+            const pinkyTip = handLandmarks[20];
+            const palmBase = handLandmarks[0];
+            
+            // 计算手指与手掌底部的距离
+            const distances = [
+                getDistance(thumbTip, palmBase),
+                getDistance(indexTip, palmBase),
+                getDistance(middleTip, palmBase),
+                getDistance(ringTip, palmBase),
+                getDistance(pinkyTip, palmBase)
+            ];
+            
+            // 手掌张开时，手指距离会较大
+            const averageDistance = distances.reduce((sum, dist) => sum + dist, 0) / distances.length;
+            
+            // 阈值判断（根据实际情况调整）
+            return averageDistance > 0.15;
+        }
+        
+        // 计算两点之间的距离
+        function getDistance(point1, point2) {
+            const dx = point1.x - point2.x;
+            const dy = point1.y - point2.y;
+            const dz = point1.z - point2.z;
+            return Math.sqrt(dx * dx + dy * dy + dz * dz);
+        }
+        
+        // 平滑噪声函数（简化版Perlin Noise）
+        function noise(x, y, z) {
+            // 简化的噪声函数，实际应用中可使用更复杂的噪声算法
+            return (Math.sin(x * 1.5 + y * 2.3 + z * 3.7 + time * 0.001) + 1) * 0.5;
+        }
+        
+        // 更新粒子动画
+        function updateParticles(deltaTime) {
+            const positions = particles.geometry.attributes.position.array;
+            const velocities = particleAttributes.velocities;
+            const targetPositions = particleAttributes.targetPositions;
+            
+            // 转换手掌中心坐标到3D空间
+            const handX = (handCenter.x - 0.5) * 200;
+            const handY = (0.5 - handCenter.y) * 200;
+            
+            for (let i = 0; i < particleCount; i++) {
+                const index = i * 3;
+                
+                if (isHandOpen) {
+                    // 流星云模式：粒子受到手掌吸引
+                    const dx = handX - positions[index];
+                    const dy = handY - positions[index + 1];
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (distance > 0) {
+                        // 引力计算
+                        const force = Math.min(1, 50 / (distance * distance));
+                        const nx = dx / distance;
+                        const ny = dy / distance;
+                        
+                        // 添加噪声使粒子运动更自然
+                        const noiseX = (noise(positions[index] * 0.01, positions[index + 1] * 0.01, time * 0.0005) - 0.5) * 0.5;
+                        const noiseY = (noise(positions[index] * 0.01 + 100, positions[index + 1] * 0.01 + 100, time * 0.0005) - 0.5) * 0.5;
+                        
+                        // 更新速度
+                        velocities[index] += (nx * force + noiseX) * 0.1;
+                        velocities[index + 1] += (ny * force + noiseY) * 0.1;
+                        velocities[index + 2] += (Math.random() - 0.5) * 0.01;
+                    }
+                    
+                    // 速度衰减
+                    velocities[index] *= 0.95;
+                    velocities[index + 1] *= 0.95;
+                    velocities[index + 2] *= 0.95;
+                    
+                } else {
+                    // 画作模式：粒子回到目标位置
+                    const dx = targetPositions[index] - positions[index];
+                    const dy = targetPositions[index + 1] - positions[index + 1];
+                    const dz = targetPositions[index + 2] - positions[index + 2];
+                    
+                    // 平滑回归到目标位置
+                    velocities[index] += dx * 0.02;
+                    velocities[index + 1] += dy * 0.02;
+                    velocities[index + 2] += dz * 0.02;
+                    
+                    // 速度衰减
+                    velocities[index] *= 0.85;
+                    velocities[index + 1] *= 0.85;
+                    velocities[index + 2] *= 0.85;
+                }
+                
+                // 更新位置
+                positions[index] += velocities[index];
+                positions[index + 1] += velocities[index + 1];
+                positions[index + 2] += velocities[index + 2];
+            }
+            
+            // 更新BufferAttribute
+            particles.geometry.attributes.position.needsUpdate = true;
+        }
+        
+        // 切换画作
+        function switchPainting() {
+            let newIndex;
+            do {
+                newIndex = Math.floor(Math.random() * loadedPaintingsData.length);
+            } while (newIndex === currentPaintingIndex);
+            
+            currentPaintingIndex = newIndex;
+            updateParticlePositionsAndColors(loadedPaintingsData[newIndex]);
+        }
+        
+        // 动画循环
+        function animate() {
+            animationId = requestAnimationFrame(animate);
+            
+            time += 1;
+            
+            // 检测手势状态变化边缘
+            if (!isHandOpen && previousHandOpen) {
+                // 从张开到握拳：切换画作
+                switchPainting();
+            }
+            previousHandOpen = isHandOpen;
+            
+            // 更新粒子
+            updateParticles(16); // 假设60fps
+            
+            // 渲染场景
+            renderer.render(scene, camera);
+        }
+        
+        // 开始动画
+        function startAnimation() {
+            animate();
+        }
+        
+        // 页面加载完成后初始化
+        window.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
