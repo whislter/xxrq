@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>欢迎页</title>
+    <style>
+        :root{--bg:#f5f7fb;--card:#fff;--accent:#3b82f6}
+        *{box-sizing:border-box;margin:0;padding:0}
+        html,body{height:100%}
+        body{
+            min-height:100vh;
+            -webkit-font-smoothing:antialiased;
+            -moz-osx-font-smoothing:grayscale;
+            font-family:Inter, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+            background:linear-gradient(180deg,var(--bg),#eef2ff);
+            display:flex;align-items:center;justify-content:center;padding:20px;
+            color:#0f172a;
+        }
+        .card{
+            width:100%;max-width:760px;background:var(--card);border-radius:12px;
+            box-shadow:0 6px 24px rgba(15,23,42,0.08);padding:36px;
+        }
+        header{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+        .logo{
+            width:56px;height:56px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#6366f1);
+            display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;
+            box-shadow:0 4px 12px rgba(59,130,246,0.18);
+        }
+        h1{font-size:22px;margin-bottom:6px}
+        p.lead{color:#475569;margin-bottom:18px}
+        .actions{display:flex;gap:10px}
+        .btn{
+            appearance:none;border:0;padding:10px 14px;border-radius:8px;font-weight:600;cursor:pointer;
+        }
+        .btn-primary{background:var(--accent);color:#fff}
+        .btn-ghost{background:transparent;border:1px solid #e6eefc;color:#0f172a}
+        footer{margin-top:20px;color:#667085;font-size:13px}
+    </style>
+</head>
+<body>
+    <main class="card" role="main">
+        <header>
+            <div class="logo">W</div>
+            <div>
+                <h1>欢迎来到我的页面</h1>
+                <p class="lead">这是一个简单的欢迎页面模板，供快速开始使用。</p>
+            </div>
+        </header>
+
+        <section>
+            <p>您可以在此处添加简介、链接或快速入口按钮。</p>
+            <div class="actions" style="margin-top:14px">
+                <button class="btn btn-primary" id="startBtn">开始</button>
+                <a class="btn btn-ghost" href="#" id="learnLink">了解更多</a>
+            </div>
+        </section>
+
+        <footer>
+            <p>© <span id="year"></span> 欢迎页示例</p>
+        </footer>
+    </main>
+
+    <script>
+        document.getElementById('year').textContent = new Date().getFullYear();
+        document.getElementById('startBtn').addEventListener('click', function(){
+            alert('欢迎！开始使用。');
+        });
+        document.getElementById('learnLink').addEventListener('click', function(e){
+            e.preventDefault();
+            alert('在这里可以放入更多信息或导航。');
+        });
+    </script>
+</body>
+</html>
